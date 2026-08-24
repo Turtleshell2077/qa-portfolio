@@ -1,148 +1,106 @@
 """Wonder Woman inspired collectible figure - procedural SDF sculpt.
 
-Original geometry, built entirely from analytic signed distance fields:
-a heroic-proportion female figure (~7.5 heads) in the classic power pose -
-hands on hips, chin up, long wavy hair, cape sweeping back to the base.
+Original geometry, built entirely from analytic signed distance fields.
+The figure is caught mid-stride: right leg planted forward, left leg pushing
+off, shoulders counter-rotated against the hips, hair and cape swept back.
 
-All coordinates are millimetres.  The soles stand on z = 0, the display
-base sits below that, the character faces +Y and +Z is up.
+All coordinates are millimetres.  The soles stand on z = 0, the display base
+sits below that, the character walks towards +Y and +Z is up.  +X is her
+right hand side.
 """
 import numpy as np
 
-from sdf_lib import (F, ln, smin, smax, union, subtract, rotmat, sphere,
-                     ellipsoid, capsule, round_cone, box, torus, cylinder,
-                     slab, seg2, star5, proj, sphere_proj, sphere_uv,
-                     emboss, engrave)
+from sdf_lib import (F, ln, smin, smax, rotmat, local, sphere, ellipsoid,
+                     capsule, round_cone, box, torus, cylinder, chain, slab,
+                     seg2, star5, circle2, proj, cyl_proj, cyl_uv, emboss,
+                     engrave)
+import head_lib
 
-# --------------------------------------------------------------- skeleton
-Z_KNEE = 39.0
-Z_HIP = 78.0
-Z_WAIST = 92.0
-Z_BUST = 106.0
-Z_SHOULDER = 115.0
-Z_HEAD = 136.8
-Z_CROWN = 148.0
 
-BASE_R = 26.0
+def aim(v):
+    """Rotation whose local +Y axis points along the unit vector v."""
+    return rotmat(rz=np.degrees(np.arctan2(-v[0], v[1])),
+                  rx=np.degrees(np.arcsin(np.clip(float(v[2]), -1.0, 1.0))))
+
+SIDES = (-1.0, 1.0)                      # -1 = her left, +1 = her right
+
+BASE_R = 27.0
 BASE_H = 4.0
 BASE_Y = -3.0
+BOUNDS = ((-34.0, 34.0), (-36.0, 30.0), (-BASE_H - 3.0, 153.0))
 
-# generous margin so the surface never touches the voxel grid wall
-BOUNDS = ((-32.0, 32.0), (-34.0, 26.0), (-BASE_H - 3.0, 153.0))
+# --------------------------------------------------------------- skeleton
+HIP = {1: (7.2, 2.4, 76.0), -1: (-7.0, -1.8, 76.0)}
+KNEE = {1: (8.6, 11.0, 40.0), -1: (-10.0, -9.5, 39.0)}
+ANKLE = {1: (7.8, 14.5, 9.0), -1: (-11.4, -16.0, 11.0)}
+TOE = {1: (7.6, 21.0, 2.6), -1: (-11.2, -9.6, 2.2)}
 
-SIDES = (-1.0, 1.0)
+SHOULDER = {1: (13.4, 1.2, 114.5), -1: (-14.2, 3.4, 115.3)}
+ELBOW = {1: (16.8, -5.6, 97.0), -1: (-17.2, 1.2, 97.5)}
+WRIST = {1: (15.2, -10.4, 82.5), -1: (-13.6, 8.4, 84.0)}
 
-# the head is turned slightly to her left, which keeps the pose from
-# reading as a mannequin; everything head-related is evaluated in this frame
-FACE_C = (0.0, 1.2, 136.8)     # decal projection centre for the face
-FACE_R = 9.0
+HEAD_O = np.array([1.2, 3.8, 134.6], dtype=F)
+HEAD_R = rotmat(rx=3.0, rz=-7.0)
 
-HEAD_PIVOT = np.array([0.0, 0.5, 120.0], dtype=F)
-HEAD_ROT = rotmat(rx=-3.0, rz=9.0)
-
-
-def fp(P):
-    return sphere_proj(P, FACE_C, FACE_R)
-
-
-def fuv(x, z):
-    return sphere_uv(x, z, FACE_C, FACE_R)
+TORSO_AXIS_Y = 1.4                       # decal projection for the costume
+TORSO_R = 12.0
 
 
 def head_frame(P):
-    return (P - HEAD_PIVOT) @ HEAD_ROT + HEAD_PIVOT
+    return (P - HEAD_O) @ HEAD_R
+
+
+def tp(P):
+    return cyl_proj(P, TORSO_AXIS_Y, TORSO_R)
+
+
+def tuv(x, z):
+    return cyl_uv(x, z, TORSO_R)
 
 
 # ------------------------------------------------------------------ torso
 def _torso(P):
-    d = ellipsoid(P, (0, -0.5, Z_HIP), (13.9, 9.0, 11.0))              # pelvis
-    d = smin(d, ellipsoid(P, (0, -5.8, 80.0), (10.8, 5.4, 7.2)), 4.0)  # seat
-    d = smin(d, ellipsoid(P, (0, -0.6, Z_WAIST), (9.3, 7.0, 8.2)), 4.5)  # waist
-    d = smin(d, ellipsoid(P, (0, -0.6, 105.5), (12.4, 8.3, 11.6)), 4.5)  # ribs
-    d = smin(d, ellipsoid(P, (0, -1.0, 113.8), (11.4, 7.2, 5.6)), 4.0)   # pecs
-    for s in SIDES:                                                     # bust
-        d = smin(d, sphere(P, (s * 5.1, 5.5, Z_BUST), 4.85), 3.2)
-    for s in SIDES:                                                     # deltoids
-        d = smin(d, sphere(P, (s * 14.0, 0.0, Z_SHOULDER), 5.6), 3.4)
-    d = smin(d, round_cone(P, (0, 1.6, 128.6), (0, 0.0, 116.0), 3.6, 5.9), 3.0)
+    d = ellipsoid(P, (0.3, 0.2, 78.0), (13.6, 8.9, 10.6), rotmat(rz=7))
+    d = smin(d, ellipsoid(P, (0.2, -5.6, 79.5), (10.4, 5.2, 7.0), rotmat(rz=7)), 4.0)
+    d = smin(d, ellipsoid(P, (0.5, 1.0, 92.0), (9.1, 7.0, 8.2), rotmat(rz=2)), 4.5)
+    d = smin(d, ellipsoid(P, (0.6, 1.8, 105.0), (12.2, 8.2, 11.4), rotmat(rz=-5)), 4.5)
+    d = smin(d, ellipsoid(P, (0.7, 1.6, 113.6), (11.3, 7.0, 5.5), rotmat(rz=-6)), 4.0)
+    for s in SIDES:                                                    # bust
+        d = smin(d, sphere(P, (s * 5.0 + 0.6, 7.0 - s * 0.5, 106.2), 4.8), 3.2)
+    for s in SIDES:                                                    # deltoids
+        d = smin(d, ellipsoid(P, SHOULDER[s], (5.0, 5.2, 5.6)), 4.2)
+    d = smin(d, round_cone(P, (1.1, 3.6, 127.0), (0.6, 1.4, 115.5), 3.4, 6.2), 3.4)
     return d
 
 
-# ------------------------------------------------------------------- head
-def _head(P):
-    d = ellipsoid(P, (0, 1.2, Z_HEAD), (7.4, 8.8, 9.7))
-    d = smax(d, round_cone(P, (0, 1.0, 141.5), (0, 4.4, 128.2), 9.2, 3.5), 2.2)
-    d = smin(d, sphere(P, (0, 7.3, 130.5), 2.3), 2.6)                   # chin
-    for s in SIDES:
-        d = smin(d, ellipsoid(P, (s * 3.8, 4.6, 134.8), (2.4, 2.2, 2.8)), 3.4)
-        d = smin(d, ellipsoid(P, (s * 7.4, 0.4, 135.6), (1.0, 1.9, 2.4)), 1.0)
-        d = smin(d, round_cone(P, (s * 1.2, 8.3, 139.6),
-                               (s * 4.6, 7.2, 139.9), 0.55, 0.3), 2.2)   # brow ridge
-    # nose
-    d = smin(d, round_cone(P, (0, 8.3, 140.8), (0, 10.2, 135.4), 0.45, 0.85), 1.1)
-    for s in SIDES:
-        d = smin(d, sphere(P, (s * 1.25, 9.5, 135.0), 0.62), 0.6)         # nostril wing
-    # lips
-    d = smin(d, ellipsoid(P, (0, 8.9, 132.2), (2.0, 0.6, 1.15)), 1.3)   # lips
-    return d
-
-
-def _face_cuts(P, d):
-    """Eyes are a ball set into an almond socket with a carved lid crease -
-    raised eyelids read as floating bars at this scale, carved ones do not.
-    Every decal is measured against a frozen copy of the field so the small
-    approximation error of one cannot stack onto the next."""
-    for s in SIDES:
-        d = smax(d, -ellipsoid(P, (s * 3.0, 9.5, 137.3), (1.6, 1.5, 1.0)), 0.35)
-        d = np.minimum(d, sphere(P, (s * 3.0, 8.05, 137.3), 1.25))
+def _abs_lines(P, d):
+    """A hint of the abdominal division - the costume covers most of it."""
+    q = tp(P)
     base = d.copy()
-    front = -(P[:, 1] - F(4.0))
-    q = fp(P)                       # arc-length coordinates over the skull
-    cut = np.full_like(d, 1e3)
-    for s in SIDES:
-        cut = np.minimum(cut, engrave(base, seg2(
-            q, fuv(s * 1.2, 138.6), fuv(s * 4.6, 138.25), 0.2, 0.14), 0.35, front))
-        cut = np.minimum(cut, engrave(base, seg2(
-            q, fuv(s * 1.4, 136.2), fuv(s * 4.4, 136.4), 0.16, 0.12), 0.25, front))
-    cut = np.minimum(cut, engrave(base, seg2(
-        q, fuv(-1.55, 132.2), fuv(1.55, 132.2), 0.24), 0.55, front))
-    d = smax(d, -cut, 0.2)
-    for s in SIDES:
-        d = smax(d, -sphere(P, (s * 1.1, 9.9, 134.9), 0.45), 0.2)         # nostril
-    return d
+    cut = engrave(base, seg2(q, tuv(0.0, 98.0), tuv(0.0, 88.0), 0.34), 0.4,
+                  -(P[:, 1] - F(3.0)))
+    return smax(d, -cut, 0.35)
 
 
 # ------------------------------------------------------------------- arms
 def _arms(P):
     d = None
     for s in SIDES:
-        S = (s * 14.0, 0.0, Z_SHOULDER)
-        E = (s * 22.8, -5.8, 96.0)
-        W = (s * 15.6, 2.2, 86.4)
-        a = round_cone(P, S, E, 4.3, 3.05)
-        a = smin(a, round_cone(P, E, W, 3.2, 2.5), 2.2)
-        R = rotmat(rx=20, rz=s * -16)
-        a = smin(a, box(P, (s * 14.0, 4.0, 82.4), (1.35, 2.5, 3.3), 1.0, R), 1.5)
-        a = smin(a, capsule(P, (s * 15.4, 1.6, 84.4),
-                            (s * 14.8, 5.2, 81.2), 1.1), 1.1)           # thumb
+        S, E, W = SHOULDER[s], ELBOW[s], WRIST[s]
+        a = round_cone(P, S, E, 4.4, 3.1)
+        a = smin(a, round_cone(P, E, W, 3.3, 2.5), 2.2)
+        # hand: a flattened wedge with a thumb rolled onto it
+        v = np.array(W, F) - np.array(E, F)
+        v /= np.linalg.norm(v)
+        side = np.cross(v, np.array([0, 0, 1.0], F))
+        side /= np.linalg.norm(side)
+        Rh = aim(v)
+        a = smin(a, box(P, tuple(np.array(W, F) + v * 3.1),
+                        (1.15, 2.2, 1.5), 1.0, Rh), 1.6)
+        a = smin(a, capsule(P, tuple(np.array(W, F) + v * 1.2 + side * s * 1.5),
+                            tuple(np.array(W, F) + v * 3.4 + side * s * 1.1),
+                            0.95), 1.1)
         d = a if d is None else np.minimum(d, a)
-    return d
-
-
-def _hand_cuts(P, d):
-    for s in SIDES:
-        for t in (-1.0, 0.0, 1.0):
-            a = (s * (14.1 + t * 0.85), 6.2, 80.2 - abs(t) * 0.3)
-            b = (s * (13.6 + t * 0.85), 2.2, 79.2 - abs(t) * 0.3)
-            d = smax(d, -engrave(d, capsule(P, a, b, 0.32), 0.7), 0.26)
-    return d
-
-
-def _bracers(P):
-    d = None
-    for s in SIDES:
-        b = round_cone(P, (s * 20.9, -3.8, 93.2), (s * 16.1, 1.5, 87.1), 4.3, 3.5)
-        d = b if d is None else np.minimum(d, b)
     return d
 
 
@@ -150,119 +108,148 @@ def _bracers(P):
 def _legs(P):
     d = None
     for s in SIDES:
-        H = (s * 7.0, 0.0, 74.0)
-        K = (s * 9.6, 1.4, Z_KNEE)
-        A = (s * 11.0, 0.6, 8.4)
-        l = round_cone(P, H, K, 6.9, 4.5)                               # thigh
-        l = smin(l, round_cone(P, K, A, 4.4, 2.85), 2.6)                # shin
-        l = smin(l, ellipsoid(P, (s * 10.5, -2.6, 29.0), (3.7, 4.0, 7.4)), 3.2)
-        l = smin(l, ellipsoid(P, (s * 9.3, 1.4, 43.5), (4.3, 4.5, 4.4)), 3.0)
-        R = rotmat(rz=s * -6)
-        l = smin(l, box(P, (s * 11.1, 2.4, 3.1), (2.7, 5.4, 2.2), 1.0, R), 1.9)
-        l = smin(l, round_cone(P, (s * 11.1, 3.2, 3.3),
-                               (s * 10.9, 9.0, 2.3), 2.7, 1.7), 1.5)    # toe
+        H, K, A, T = HIP[s], KNEE[s], ANKLE[s], TOE[s]
+        l = round_cone(P, H, K, 6.9, 4.5)
+        l = smin(l, round_cone(P, K, A, 4.4, 2.8), 2.6)
+        mid = tuple((np.array(K, F) * 0.62 + np.array(A, F) * 0.38)
+                    + np.array([s * 0.6, -2.6, 0], F))
+        l = smin(l, ellipsoid(P, mid, (3.7, 4.0, 7.2)), 3.2)             # calf
+        l = smin(l, ellipsoid(P, tuple(np.array(K, F) + np.array([0, 1.0, 3.0], F)),
+                              (4.3, 4.5, 4.6)), 3.0)                     # knee
+        # foot: a sole slab aligned with the ankle-to-toe axis, plus a heel
+        A3, T3 = np.array(A, F), np.array(T, F)
+        v = T3 - A3
+        L = float(np.linalg.norm(v))
+        v = v / L
+        Rf = aim(v)
+        l = smin(l, box(P, tuple((A3 + T3) * 0.5), (1.5, L * 0.5 - 0.6, 0.7), 1.7, Rf), 1.6)
+        l = smin(l, sphere(P, tuple(A3 - v * 1.2 + np.array([0, 0, -1.6], F)), 2.5), 2.0)
         d = l if d is None else np.minimum(d, l)
     return d
 
 
-def _boot_top(P):
-    """Rim of the over-the-knee boot: peaks at the front, dips at the back."""
-    t = np.clip((P[:, 1] - F(1.4)) / F(5.4), -1.0, 1.0)
-    return F(44.0) + F(4.6) * t
+def _boot_top(P, s):
+    """Rim of the over-the-knee boot, peaked at the front."""
+    t = np.clip((P[:, 1] - F(KNEE[s][1])) / F(6.0), -1.0, 1.0)
+    return F(KNEE[s][2] + 7.0) + F(4.4) * t
 
 
 def _boots(P, legs):
-    d = np.maximum(legs - F(0.95), P[:, 2] - _boot_top(P))
+    d = np.full_like(legs, 1e3)
+    for s in SIDES:
+        b = np.maximum(legs - F(1.6), P[:, 2] - _boot_top(P, s))
+        b = np.maximum(b, F(-s) * P[:, 0])          # each boot on its own side
+        d = np.minimum(d, b)
     return smax(d, -(P[:, 2] + F(BASE_H + 4.0)), 0.4)
+
+
+# ------------------------------------------------------------------- head
+def _head(P):
+    return head_lib.head(head_frame(P))
 
 
 # ------------------------------------------------------------------- hair
 def _hair(P):
-    cap = ellipsoid(P, (0, -0.3, 138.2), (8.5, 9.4, 9.3))
-    cap = smin(cap, sphere(P, (0, -3.0, 140.5), 7.4), 3.0)              # crown
-    # a box-shaped opening gives a proper hairline instead of a bald dome
-    face = box(P, (0, 12.2, 134.2), (4.7, 5.5, 6.4), 2.4)
+    """Long hair caught by the wind: swept back and to her left."""
+    Q = head_frame(P)
+    cap = ellipsoid(Q, (0, -0.6, 1.6), (7.5, 8.4, 9.0))
+    cap = smin(cap, ellipsoid(Q, (0, -3.4, 2.4), (6.9, 6.6, 7.8)), 3.4)
+    face = box(Q, (0, 11.0, -3.4), (3.9, 5.0, 5.6), 2.6)
     cap = smax(cap, -face, 1.2)
     d = cap
-    d = smin(d, ellipsoid(P, (0, -6.8, 126.0), (8.7, 6.4, 15.5)), 3.2)  # back mass
-    d = smin(d, round_cone(P, (0, -8.2, 116.0), (0, -6.0, 101.5), 7.2, 3.4), 3.0)
-    for s in SIDES:                                                     # locks
-        d = smin(d, round_cone(P, (s * 6.6, -3.6, 133.0),
-                               (s * 8.8, -3.4, 118.0), 3.4, 3.0), 2.5)
-        d = smin(d, round_cone(P, (s * 8.8, -3.4, 118.0),
-                               (s * 8.4, -0.2, 108.0), 3.0, 2.3), 2.4)
-        d = smin(d, round_cone(P, (s * 8.4, -0.2, 108.0),
-                               (s * 7.2, 2.0, 100.0), 2.3, 1.1), 2.0)
-        d = smin(d, round_cone(P, (s * 8.2, -6.0, 126.0),
-                               (s * 10.2, -4.4, 110.0), 2.6, 1.9), 2.4)
+    # the mass gathered behind the head
+    d = smin(d, ellipsoid(Q, (-1.2, -6.0, -3.0), (7.4, 6.2, 8.2)), 3.4)
+    # streams of hair, each a tapered chain sweeping back and to her left
+    locks = [
+        [(5.6, -1.0, 5.0), (7.2, -4.0, 0.0), (7.0, -7.5, -6.0), (4.6, -11.0, -13.0),
+         (0.5, -13.5, -19.0), (-5.0, -14.0, -23.5)],
+        [(6.4, 0.6, 1.6), (7.6, -3.0, -3.4), (6.4, -7.0, -10.0), (2.6, -10.5, -16.5),
+         (-3.0, -12.5, -21.0)],
+        [(-5.8, -0.6, 5.2), (-7.6, -3.6, 0.4), (-8.6, -7.0, -5.4), (-8.4, -10.0, -12.0),
+         (-7.0, -12.0, -18.5), (-4.6, -12.5, -24.0)],
+        [(-6.6, 0.8, 1.4), (-8.4, -2.6, -3.6), (-9.4, -6.0, -10.4), (-9.0, -9.0, -17.0),
+         (-7.6, -10.5, -23.0)],
+        [(0.0, -5.0, 8.0), (1.6, -8.4, 3.0), (1.0, -11.0, -4.0), (-1.6, -12.6, -11.0),
+         (-5.0, -13.0, -17.5), (-8.6, -12.0, -22.0)],
+        [(3.0, -4.2, 7.0), (4.6, -8.0, 1.6), (3.6, -11.4, -5.6), (0.4, -13.4, -12.6),
+         (-4.0, -14.0, -18.0)],
+        [(-3.0, -4.4, 7.2), (-4.6, -8.2, 2.0), (-5.6, -11.4, -5.0), (-6.6, -13.0, -12.0),
+         (-7.4, -13.0, -18.0)],
+    ]
+    radii = [(3.0, 3.2, 3.0, 2.6, 2.0, 1.1),
+             (2.8, 3.0, 2.6, 2.0, 1.0),
+             (3.0, 3.2, 3.0, 2.6, 2.0, 1.1),
+             (2.8, 3.0, 2.6, 2.0, 1.0),
+             (3.2, 3.4, 3.2, 2.8, 2.2, 1.2),
+             (2.8, 3.0, 2.8, 2.2, 1.1),
+             (2.8, 3.0, 2.8, 2.2, 1.1)]
+    for pts, rad in zip(locks, radii):
+        d = smin(d, chain(Q, pts, rad, k=2.6), 3.2)
     return d
 
 
 def _hair_strands(P, d):
-    """Grooves that break the hair into locks: great circles over the crown
-    plus straight strands running down the back."""
+    Q = head_frame(P)
     base = d.copy()
     cut = np.full_like(d, 1e3)
-    # the rings must stay inside the hair - behind the face plane or above the
-    # hairline - otherwise they comb grooves straight across the brow
-    hair_only = np.minimum(P[:, 1] - F(3.5), F(143.2) - P[:, 2])
-    for a in (-40.0, -27.0, -14.0, 0.0, 14.0, 27.0, 40.0):
-        g = torus(P, (0, -0.3, 138.4), 9.7, 0.42, rotmat(ry=90, rz=a))
-        g = np.maximum(np.maximum(g, F(129.0) - P[:, 2]), hair_only)
-        cut = np.minimum(cut, engrave(base, g, 0.6))
-    for s in SIDES:
-        for x0, x1, z0, z1 in ((2.4, 4.6, 140.0, 114.0),
-                               (5.4, 8.2, 138.0, 108.0),
-                               (7.6, 9.6, 133.0, 104.0)):
-            g = capsule(P, (s * x0, -4.0, z0), (s * x1, -9.5, z1), 0.4)
-            cut = np.minimum(cut, engrave(base, g, 0.65))
+    hair_only = np.minimum(Q[:, 1] - F(3.0), F(6.4) - Q[:, 2])
+    for a in (-42.0, -28.0, -14.0, 0.0, 14.0, 28.0, 42.0):
+        g = torus(Q, (0, -0.6, 1.8), 8.7, 0.4, rotmat(ry=90, rz=a))
+        cut = np.minimum(cut, engrave(base, np.maximum(
+            np.maximum(g, F(-7.0) - Q[:, 2]), hair_only), 0.55))
+    # grooves running along the streaming locks
+    for x0, y0, z0, x1, y1, z1 in (
+            (6.4, -2.0, 3.0, -2.0, -13.0, -20.0),
+            (4.0, -4.0, 5.0, -5.5, -13.5, -18.0),
+            (-6.6, -2.0, 3.0, -6.0, -12.5, -21.0),
+            (-4.0, -5.0, 5.0, -8.0, -12.0, -19.0),
+            (1.0, -6.0, 6.0, -7.0, -12.5, -20.0)):
+        cut = np.minimum(cut, engrave(
+            base, capsule(Q, (x0, y0, z0), (x1, y1, z1), 0.42), 0.6))
     return smax(d, -cut, 0.45)
 
 
 # ------------------------------------------------------------------- cape
 def _cape(P):
-    """A cape as a swept shell: radius grows towards the hem, ripples with a
-    couple of harmonics for folds, and the angular span widens as it falls, so
-    it springs from between the shoulder blades and flares out at the ground."""
+    """A short mantle streaming back off the shoulders.  It deliberately stops
+    above the knees: a full length cape hides the stride completely."""
     x = P[:, 0]
-    y = P[:, 1] - F(1.0)
+    y = P[:, 1] - F(2.0)
     z = P[:, 2]
     r = np.hypot(x, y)
-    th = np.arctan2(x, y)                    # 0 = front, +-pi = straight back
-    t = np.clip((F(114.0) - z) / F(112.0), 0.0, 1.0)
+    th = np.arctan2(x, y)
+    t = np.clip((F(114.0) - z) / F(60.0), 0.0, 1.0)
 
-    R = F(13.0) + F(15.0) * t ** 1.6
-    R = (R + F(2.4) * np.sin(F(9.0) * th + F(0.5)) * t ** 1.2
-         + F(1.0) * np.sin(F(15.0) * th - F(1.0)) * t * t
-         + F(1.8) * np.sin(th) * t)          # a touch of asymmetry
-    # narrow at the shoulders, wide at the hem
-    lim = np.radians(F(112.0) + F(42.0) * np.clip((z - F(66.0)) / F(46.0), 0.0, 1.0))
+    R = F(12.0) + F(14.5) * t ** 1.3
+    R = (R + F(2.2) * np.sin(F(8.0) * th + F(0.4)) * t
+         + F(1.0) * np.sin(F(13.0) * th - F(1.0)) * t * t
+         + F(3.4) * np.sin(th) * t)               # blown towards her left
+    lim = np.radians(F(108.0) + F(30.0) * np.clip((z - F(70.0)) / F(40.0), 0.0, 1.0))
     edge = np.clip((np.abs(th) - lim) / F(0.45), 0.0, 1.0)
-    # the upper corners and the top hem tuck back into the torso so the cape
-    # grows out of the shoulder blades; lower down the edges hang free
-    tuck = np.clip((z - F(86.0)) / F(16.0), 0.0, 1.0)
+    tuck = np.clip((z - F(92.0)) / F(14.0), 0.0, 1.0)
     top = np.clip((F(112.0) - z) / F(9.0), 0.0, 1.0)
-    R = R * (F(1.0) - F(0.42) * (F(1.0) - edge) * tuck) * (F(0.55) + F(0.45) * top)
+    R = R * (F(1.0) - F(0.4) * (F(1.0) - edge) * tuck) * (F(0.55) + F(0.45) * top)
 
-    half = (F(1.95) - F(0.5) * t) * F(0.5)
+    half = (F(1.9) - F(0.45) * t) * F(0.5)
     d = np.abs(r - R) - half
     d = smax(d, -(np.abs(th) - lim) * np.minimum(r, F(14.0)), 0.9)
     lift = (1.0 - np.clip((np.abs(th) - lim) / F(0.42), 0.0, 1.0)) ** 2
-    hem = F(0.5) + F(26.0) * lift - F(4.0) * np.sin(F(9.0) * th + F(0.5))
-    d = smax(d, hem - z, 0.9)
-    d = smax(d, z - F(115.0), 0.8)
+    hem = F(54.0) + F(40.0) * lift - F(4.5) * np.sin(F(8.0) * th + F(0.4))
+    d = smax(d, hem - z, 1.2)
+    d = smax(d, z - F(116.0), 0.8)
 
-    coll = torus(P, (0, -0.8, 117.6), 6.4, 1.45, rotmat(rx=12))
-    coll = np.maximum(coll, P[:, 1] - F(0.6))
+    coll = torus(P, (0.6, 0.4, 118.0), 6.4, 1.5, rotmat(rx=12, rz=-6))
+    coll = np.maximum(coll, P[:, 1] - F(1.6))
     return np.minimum(d, coll)
 
 
 # ------------------------------------------------------------------ lasso
 def _lasso(P):
-    R = rotmat(rx=90, rz=-12, ry=8)
-    d = torus(P, (15.4, 5.0, 75.4), 4.9, 0.9, R)
-    d = np.minimum(d, torus(P, (15.8, 3.6, 75.8), 4.1, 0.78, R))
-    d = np.minimum(d, capsule(P, (14.6, 4.2, 80.2), (13.8, 2.8, 85.2), 0.72))
+    R = rotmat(rx=90, rz=-14, ry=10)
+    c = (14.6, 5.6, 74.0)
+    d = torus(P, c, 4.8, 0.9, R)
+    d = np.minimum(d, torus(P, (c[0] + 0.4, c[1] - 1.4, c[2] + 0.4), 4.0, 0.78, R))
+    d = np.minimum(d, capsule(P, (13.8, 4.8, 78.6), (13.0, 3.4, 84.0), 0.72))
     return d
 
 
@@ -271,10 +258,10 @@ def _base(P):
     return cylinder(P, (0, BASE_Y, -BASE_H * 0.5), BASE_R, BASE_H * 0.5, rad=0.9)
 
 
-# ------------------------------------------------------- costume decoration
-def _ww_emblem(P, z0=107.6):
-    """Stylised twin-W crest, drawn as a tapered polyline in the XZ plane."""
-    p = proj(P, (0, 2), (0.0, z0))
+# ------------------------------------------------------------------ armour
+def _crest(P, z0=107.0):
+    """Stylised twin-W crest."""
+    p = proj(P, (0, 2), (0.6, z0))
     d = seg2(p, (-6.4, 3.1), (-2.6, -3.4), 0.55, 1.15)
     d = smin(d, seg2(p, (-2.6, -3.4), (0.0, 2.0), 1.15, 0.85), 0.45)
     d = smin(d, seg2(p, (0.0, 2.0), (2.6, -3.4), 0.85, 1.15), 0.45)
@@ -282,86 +269,123 @@ def _ww_emblem(P, z0=107.6):
     return d
 
 
-def _details(P, H, d, legs):
-    """Costume decoration that has to hug the finished surface.
+def _bustier_top(u):
+    """Sweetheart neckline: dips at the sternum, rises over each breast and
+    falls away across the back."""
+    back = np.clip((np.abs(u) - F(15.0)) / F(9.0), 0.0, 1.0)
+    return (F(108.8) + F(3.4) * np.exp(-((u - F(5.6)) / F(4.2)) ** 2)
+            + F(3.4) * np.exp(-((u + F(5.6)) / F(4.2)) ** 2)
+            - F(6.5) * back)
 
-    P are world points, H the same points in the head frame.  Every decal is
-    measured against `base`, a frozen copy of the body field: an embossed
-    detail is only an approximate distance field, so feeding one into the next
-    would let the error accumulate until details float off the surface."""
+
+def _armour(P, d, legs, arms):
+    """Plate armour laid over the body as surface relief."""
     base = d.copy()
-    front = -(P[:, 1] - F(0.0))          # keep y > 0
-    back = P[:, 1] - F(-1.0)             # keep y < -1
+    q = tp(P)
+    u, v = q[:, 0], q[:, 1]
+    front = -(P[:, 1] - F(1.0))
+    torso_only = F(1.4) - arms          # the wrap must not creep onto the arms
     z = P[:, 2]
-    p = proj(P, (0, 2), (0.0, 0.0))
 
     raised = np.full_like(d, 1e3)
-    # tiara: a full circlet with the star over the brow
-    raised = np.minimum(raised, emboss(base, slab(H, 2, 142.2, 0.75), 0.6))
-    su, sv = fuv(0.0, 142.3)
+    # --- bustier -------------------------------------------------------
+    top = _bustier_top(u)
+    bust = np.maximum(v - top, F(88.6) - v)
+    raised = np.minimum(raised, emboss(base, bust, 0.5, torso_only))
     raised = np.minimum(raised, emboss(
-        base, star5(fp(H) - np.array([su, sv], F), 2.1), 0.9, -(H[:, 1] - F(3.0))))
-    # chest crest
-    raised = np.minimum(raised, emboss(base, _ww_emblem(P), 0.65, -(P[:, 1] - F(2.0))))
-    # belt and its star
-    raised = np.minimum(raised, emboss(base, slab(P, 2, 87.2, 1.8), 0.6))
+        base, np.abs(v - top) - F(0.65), 0.75, torso_only))
+    raised = np.minimum(raised, emboss(base, _crest(P), 0.75, -(P[:, 1] - F(3.0))))
+    # --- belt ----------------------------------------------------------
     raised = np.minimum(raised, emboss(
-        base, star5(proj(P, (0, 2), (0.0, 87.2)), 2.4), 0.95, front))
-    # stars over the skirt
-    for cx, cz, cl in ((0.0, 77.0, front), (-8.8, 79.5, front), (8.8, 79.5, front),
-                       (-5.6, 78.0, back), (5.6, 78.0, back)):
-        raised = np.minimum(raised, emboss(
-            base, star5(proj(P, (0, 2), (cx, cz)), 1.6), 0.4, cl))
-    # boot trim: a band along the rim plus a stripe down the front
-    rim = np.maximum(np.abs(z - (_boot_top(P) - F(2.0))) - F(0.7), legs - F(1.9))
-    raised = np.minimum(raised, emboss(base, rim, 0.4))
+        base, np.abs(v - F(87.4)) - F(1.9), 0.75, torso_only))
+    raised = np.minimum(raised, emboss(
+        base, star5(proj(P, (0, 2), (0.6, 87.4)), 2.4), 1.0, front))
+    # --- skirt plates --------------------------------------------------
+    skirt = np.maximum(v - F(85.4), F(70.5) + F(2.2) * np.cos(u / F(5.0)) - v)
+    raised = np.minimum(raised, emboss(base, skirt, 0.55, torso_only))
+    # --- bracers -------------------------------------------------------
     for s in SIDES:
-        raised = np.minimum(raised, emboss(
-            base, seg2(p, (s * 10.9, 7.0), (s * 10.4, 34.0), 0.6), 0.4, front))
+        E, W = np.array(ELBOW[s], F), np.array(WRIST[s], F)
+        a = tuple(E + (W - E) * 0.28)
+        b = tuple(E + (W - E) * 0.92)
+        raised = np.minimum(raised, round_cone(P, a, b, 4.3, 3.6))
+    # --- boots: knee plate, rim and shin ribs --------------------------
+    for s in SIDES:
+        K = np.array(KNEE[s], F)
+        raised = np.minimum(raised, emboss(base, np.maximum(
+            np.abs(z - (_boot_top(P, s) - F(2.1))) - F(0.8),
+            np.maximum(legs - F(2.4), F(-s) * P[:, 0])), 0.5))
+        raised = np.minimum(raised, ellipsoid(
+            P, tuple(K + np.array([0, 2.0, 3.4], F)), (3.6, 3.4, 3.6)))
+        A3, K3 = np.array(ANKLE[s], F), np.array(KNEE[s], F)
+        fwd = np.array([0.0, 1.0, 0.0], F)
+        for k in (-1.0, 0.0, 1.0):
+            off = np.array([k * 1.9, 0.0, 0.0], F)
+            raised = np.minimum(raised, np.maximum(
+                capsule(P, tuple(A3 + off + fwd * 1.4),
+                        tuple(K3 * 0.72 + A3 * 0.28 + off + fwd * 1.4), 0.7),
+                F(-s) * P[:, 0]))
+        # cuff where the boot meets the calf
+        raised = np.minimum(raised, emboss(base, np.maximum(
+            np.abs(z - (_boot_top(P, s) - F(6.0))) - F(0.9),
+            np.maximum(legs - F(2.6), F(-s) * P[:, 0])), 0.4))
     d = np.minimum(d, raised)
 
     cut = np.full_like(d, 1e3)
-    # leotard seams
-    neck = smin(seg2(p, (-8.8, 115.0), (0.0, 109.8), 0.42),
-                seg2(p, (0.0, 109.8), (8.8, 115.0), 0.42), 0.4)
-    cut = np.minimum(cut, engrave(base, neck, 0.55, -(P[:, 1] - F(2.0))))
+    # radiating panel lines over the bustier
+    for a in (-3, -2, -1, 1, 2, 3):
+        cut = np.minimum(cut, engrave(base, seg2(
+            q, (0.6, 99.0), (0.6 + a * 6.2, 91.0 + abs(a) * 1.2), 0.28), 0.45))
+    cut = np.minimum(cut, engrave(base, seg2(q, (0.6, 100.5), (0.6, 89.5), 0.3), 0.45))
+    # separations between the skirt plates
+    for i in range(-7, 8):
+        uu = F(i) * F(5.0) + F(0.6)
+        cut = np.minimum(cut, engrave(base, seg2(
+            q, (uu, 85.0), (uu * 1.12, 71.0), 0.3), 0.5))
+    # bracer flutes
     for s in SIDES:
-        legf = smin(seg2(p, (s * 14.4, 82.0), (s * 10.0, 74.0), 0.42),
-                    seg2(p, (s * 10.0, 74.0), (s * 4.4, 68.0), 0.42), 0.5)
-        cut = np.minimum(cut, engrave(base, legf, 0.55, front))
-        cut = np.minimum(cut, engrave(
-            base, seg2(p, (s * 13.4, 79.5), (s * 4.6, 71.0), 0.42), 0.55, back))
-        for k in (-1.4, 1.4):                                  # bracer flutes
-            a = (s * 20.7 + k * 0.4, -4.0 + k * 1.5, 92.6)
-            b = (s * 16.0 + k * 0.4, 1.3 + k * 1.5, 87.3)
-            cut = np.minimum(cut, engrave(base, capsule(P, a, b, 0.42), 0.5))
+        E, W = np.array(ELBOW[s], F), np.array(WRIST[s], F)
+        n = np.cross(W - E, np.array([0, 0, 1.0], F))
+        n /= np.linalg.norm(n)
+        for k in (-1.0, 0.0, 1.0):
+            off = n * (k * 2.4) + np.array([0, 0, k * 1.2], F)
+            cut = np.minimum(cut, engrave(base, capsule(
+                P, tuple(E + (W - E) * 0.33 + off), tuple(E + (W - E) * 0.88 + off),
+                0.4), 0.5))
     d = smax(d, -cut, 0.3)
 
-    # groove around the rim of the base
-    ring = np.maximum(np.abs(np.hypot(P[:, 0], P[:, 1] - F(BASE_Y)) - F(22.6)) - F(0.55),
+    ring = np.maximum(np.abs(np.hypot(P[:, 0], P[:, 1] - F(BASE_Y)) - F(23.4)) - F(0.55),
                       np.abs(z + F(0.6)) - F(2.5))
     return smax(d, -ring, 0.25)
 
 
+def _tiara(P, d):
+    Q = head_frame(P)
+    base = d.copy()
+    band = slab(Q, 2, 5.4, 0.75)
+    r = emboss(base, band, 0.55)
+    su, sv = head_lib.duv(0.0, 5.5)
+    r = np.minimum(r, emboss(base, star5(
+        head_lib.dp(Q) - np.array([su, sv], F), 2.1), 0.85, -(Q[:, 1] - F(3.0))))
+    return np.minimum(d, r)
+
+
 # --------------------------------------------------------------------- API
 def sdf(P):
-    """Signed distance of the whole figure; P is (N, 3), result is (N,)."""
     P = np.ascontiguousarray(P, dtype=F)
-    H = head_frame(P)
-
     legs = _legs(P)
+    arms = _arms(P)
     d = _torso(P)
     d = smin(d, legs, 3.2)
-    d = smin(d, _arms(P), 2.6)
-    d = smin(d, _head(H), 2.2)
-    d = _face_cuts(H, d)
-    d = _hand_cuts(P, d)
-    d = np.minimum(d, _bracers(P))
+    d = smin(d, arms, 2.6)
+    d = smin(d, _head(P), 2.4)
+    d = _abs_lines(P, d)
     d = np.minimum(d, _boots(P, legs))
-    d = smin(d, _hair(H), 1.6)
-    d = _hair_strands(H, d)
+    d = smin(d, _hair(P), 1.6)
+    d = _hair_strands(P, d)
     d = smin(d, _cape(P), 1.5)
     d = np.minimum(d, _lasso(P))
-    d = _details(P, H, d, legs)
+    d = _armour(P, d, legs, arms)
+    d = _tiara(P, d)
     d = smin(d, _base(P), 1.8)
     return d

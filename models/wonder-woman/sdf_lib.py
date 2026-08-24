@@ -190,6 +190,19 @@ def sphere_proj(P, centre, radius):
     return np.stack([u, v], axis=-1)
 
 
+def cyl_proj(P, axis_y, radius):
+    """Decal coordinates for a mostly-forward-facing surface: horizontal arc
+    length around a vertical axis, and z kept as-is so vertical placement of a
+    feature is exact (a spherical mapping shifts it down by the difference
+    between the assumed and the real radius)."""
+    u = np.arctan2(P[:, 0], P[:, 1] - F(axis_y)) * F(radius)
+    return np.stack([u, P[:, 2]], axis=-1)
+
+
+def cyl_uv(x, z, radius):
+    return (float(np.arcsin(np.clip(float(x) / radius, -1.0, 1.0)) * radius), float(z))
+
+
 def sphere_uv(x, z, centre, radius):
     """Arc-length coordinates of the surface point above (x, z)."""
     dz = float(z) - centre[2]
@@ -203,6 +216,34 @@ def proj(P, axes, centre=(0.0, 0.0)):
     """Project 3D points onto a 2D plane given by two axis indices."""
     c = np.asarray(centre, F)
     return np.stack([P[:, axes[0]] - c[0], P[:, axes[1]] - c[1]], axis=-1)
+
+
+def chain(P, pts, radii, k=0.0):
+    """Smoothly blended chain of tapered capsules through `pts`."""
+    d = None
+    for i in range(len(pts) - 1):
+        seg = round_cone(P, pts[i], pts[i + 1], radii[i], radii[i + 1])
+        d = seg if d is None else (np.minimum(d, seg) if k <= 0 else smin(d, seg, k))
+    return d
+
+
+def shell(P, c, r_out, r_in):
+    """Hollow sphere wall."""
+    return np.maximum(sphere(P, c, r_out), -sphere(P, c, r_in))
+
+
+def lens(P, c, half_h, half_w, R=None, axis=1):
+    """Almond aperture: a 2D lens (two overlapping circles) extruded along
+    `axis`.  Extruding matters - a lens built from two *spheres* is a flat
+    disc that never cuts through the full thickness of an eyelid."""
+    p = P - np.asarray(c, F)
+    if R is not None:
+        p = p @ R
+    u = p[:, 0] if axis != 0 else p[:, 1]
+    v = p[:, 2] if axis != 2 else p[:, 1]
+    a = (half_w * half_w - half_h * half_h) / (2.0 * half_h)
+    ra = F(a + half_h)
+    return np.maximum(np.hypot(u, v - F(a)) - ra, np.hypot(u, v + F(a)) - ra)
 
 
 # --------------------------------------------------------------- surface detail
